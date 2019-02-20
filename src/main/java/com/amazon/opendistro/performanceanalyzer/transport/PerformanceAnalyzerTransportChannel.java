@@ -24,13 +24,16 @@ import org.elasticsearch.transport.TransportChannel;
 import org.elasticsearch.transport.TransportResponse;
 import org.elasticsearch.transport.TransportResponseOptions;
 
+import com.amazon.opendistroforelasticsearch.common.AbstractTransportChannel;
+
 import com.amazon.opendistro.performanceanalyzer.metrics.AllMetrics.ShardBulkDimension;
 import com.amazon.opendistro.performanceanalyzer.metrics.AllMetrics.ShardBulkMetric;
 import com.amazon.opendistro.performanceanalyzer.metrics.MetricsProcessor;
 import com.amazon.opendistro.performanceanalyzer.metrics.PerformanceAnalyzerMetrics;
 import com.amazon.opendistro.performanceanalyzer.metrics.ThreadIDUtil;
 
-public class PerformanceAnalyzerTransportChannel implements TransportChannel, MetricsProcessor {
+
+public class PerformanceAnalyzerTransportChannel implements AbstractTransportChannel, MetricsProcessor {
     private static final Logger LOG = LogManager.getLogger(PerformanceAnalyzerTransportChannel.class);
     private static final int KEYS_PATH_LENGTH = 3;
     private static final AtomicLong UNIQUE_ID = new AtomicLong(0);
@@ -92,6 +95,10 @@ public class PerformanceAnalyzerTransportChannel implements TransportChannel, Me
     public void sendResponse(Exception exception) throws IOException {
         emitMetricsFinish(exception);
         original.sendResponse(exception);
+    }
+
+    public TransportChannel getInnerChannel() {
+      return original;
     }
 
     private void emitMetricsFinish(Exception exception) {

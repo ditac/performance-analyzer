@@ -193,8 +193,11 @@ public class MetricsEmitter {
 
     public static void emitWorkloadMetrics(final DSLContext create, final MetricsDB db,
             final ShardRequestMetricsSnapshot rqMetricsSnap) throws Exception {
+        LOG.info("Emitting Workload metrics.");
         long mCurrT = System.currentTimeMillis();
         Result<Record> res = rqMetricsSnap.fetchLatencyByOp();
+        LOG.info(rqMetricsSnap.fetchAll());
+        LOG.info(rqMetricsSnap.fetchLatency().fetch());
         List<String> dims = new ArrayList<String>() { {
             this.add(ShardRequestMetricsSnapshot.Fields.OPERATION.toString());
             this.add(HttpRequestMetricsSnapshot.Fields.EXCEPTION.toString());
@@ -227,6 +230,7 @@ public class MetricsEmitter {
                        shardDims);
         BatchBindStep bulkDocHandle = db.startBatchPut(new Metric<Double>(
                 AllMetrics.ShardBulkMetric.DOC_COUNT.toString(), 0d), shardDims);
+        LOG.info("Latency Table - {}", res);
 
         for (Record r: res) {
             Double sumLatency = Double.parseDouble(r.get(DBUtils.
