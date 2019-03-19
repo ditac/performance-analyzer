@@ -18,12 +18,29 @@ Elasticsearch and the performance analyzer.
 # Performance Analyzer Application
 
 The performance analyzer application runs periodically and takes snapshots of
-the data from shared memory. There are three main components in the performance
-analyzer application -
+the data from shared memory.
 
 * How often does it run?
+The application constantly polls a common shared directory for event data
+written by Elasticsearch plugin. The writer deletes old data periodically, but
+some events like OSMetrics are overwritten every 5 seconds. Hence, the reader
+application runs every 2.5 seconds to make sure that no update from the writer
+is missed during normal operation. This avoids explicit synchronization between
+the reader and writer processes.
+
 * Which language pros/cons
+The performance analyzer application is written in Java, and that allows us to
+share code with the writer elasticsearch plugin.
+Java libraries like jdbc and jooq made it very easy to generate sql
+programmatically.
+The Java process by default takes up a lot of memory. We are running the
+process with some specific options but there is room for further memory
+optimization to enable the process to run on smaller instances.
+
 * Will it scale as we add more processors and events?
+Currently the application can process more up to a 100k events per second
+on a single thread. If necessary, the metrics processing pipeline can be
+modified to parse events concurrently.
 
 ## Metrics Processor 
 
@@ -33,8 +50,18 @@ thread. The snapshots are held in a concurrent map and all customer requests to
 fetch data are processed without any locks.
 
 * How does it handle fairness between components?
+The metrics processor processes events one after another. Hence, if processing
+one particular type of event is slow then all metrics are delayed.
+
 * What happens if it does not complete before the next run?
+If metrics processing is not completed before the next run, then the metrics
+processing for the next run is skipped. This leads to missing metrics for
+a particular time period.
+
 * What happens if one of the components is not processed and has an error?
+All parsing errors should be handled and ignored when processing metrics.
+Unknown errors will bubble up and cause the reader metrics processor to
+restart.
 
 ## Metrics Parser
 
@@ -42,20 +69,36 @@ The metrics parser parses files in shared memory and writes the data
 into inmemory snapshots in sqlite.
 
 * How does it make it easier to add more parsers in the future?
+Currently every parser is implemented independently. There will be utility
+functions that will make it very easy to parse files and import data.
+
 * How does it make it easier to batch load into inmemory snapshots?
+We batch all updates form that need to be made to an inmemory snapshot and
+apply it via a single update operation. This gives us a significant performance
+boost.
+
 * Can it be made more generic?
+Going forward, we can specify paths and filenames to parse events and load them
+into an inmemory snapshot.
 
 ## Snapshots
 
 These are inmemory representation of data in sqlite tables. The snapshots allow
-us to correlate data across different types of events. There are two main
-operations that snapshots provide - 
+us to correlate data across different types of events.
 
 * Why sqlite?
+Sqlite is a very popular database that can be embedded into our process. Java
+libraries for sqlite is also widely used and easy to onboard.
 * write/read performance
+From our tests we were able to do more than 100k writes per second and run
+complex queries in milliseconds.
 * Resource utilization?
+The CPU Utilization of sqlite was minimal. The memory utilization of the entire
+process after a few days processing metrics was constant around 400mb. This
+needs further investigation on smaller instance types.
 * How many snapshots?
-* Synchronization between read/write?
+We only need to hold snapshots in memory until the corresponding metrics are
+written to the metrics database. After that snapshots can be deleted.
 
 ### Alignment 
 
@@ -67,8 +110,15 @@ windows. It does this by calculating time weighted average for metrics across
 windows.
 
 * Is there a simpler approach? Why is alignment even necessary?
+The metrics written by the writer are not perfectly aligned. Additionally,
+unpredictable events like garbage collection can add a skew to metric
+publishing.
+
 * What happens when there are missing snapshots?
+No metrics are emitted.
+
 * What happens if there are multiple snapshots in the same window?
+The latest snapshot is considered.
 
 ### Correlation
 
