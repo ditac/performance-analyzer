@@ -39,61 +39,55 @@ subcomponents. It schedules periodic jobs which is executed on a single
 thread. The snapshots are held in a concurrent map and all customer requests to
 fetch data are processed without any locks.
 
-* How does it handle fairness between components?
-The metrics processor processes events one after another. Hence, if processing
-one particular type of event is slow then all metrics are delayed.
+There are two main stages in the metrics processor - 
+* MetricsParser - This parses event files from shared memory and populates an
+  inmemory database with the necessary data.
+* MetricsEmitter - This stage queries the inmemory database for all the data
+  and then populates the on-disk MetricDB.
 
-* What happens if it does not complete before the next run?
-If metrics processing is not completed before the next run, then the metrics
-processing for the next run is skipped. This leads to missing metrics for
-a particular time period.
+The metrics processor processes all the events generated in the metricsParser
+stage before proceeding to the metricsEmitter stage. Metrics are visible to the
+client only after the metricsEmitter stage completes for all metrics. We
+currently do not support individual pipelines per metric type. If metrics processing is
+not completed before the next run, then the metrics processing for the next
+run is scheduled only after the current run completes. This can lead to missing metrics
+for a particular time period.
 
-* What happens if one of the components is not processed and has an error?
+#### Error handling
 All parsing errors should be handled and ignored when processing metrics.
 Unknown errors will bubble up and cause the reader metrics processor to
 restart.
 
-## Metrics Parser
+### Metrics Parser
 
 The metrics parser parses files in shared memory and writes the data
-into inmemory snapshots in sqlite.
+into inmemory snapshots in sqlite.Currently every parser is implemented independently.
+We have a utility functions that make it easy to parse files and import data,
+but need more work to be able to move to complete configuration based parsing.
 
-* How does it make it easier to add more parsers in the future?
-Currently every parser is implemented independently. There will be utility
-functions that will make it very easy to parse files and import data.
-
-* How does it make it easier to batch load into inmemory snapshots?
-We batch all updates form that need to be made to an inmemory snapshot and
+After parsing, we batch all updates form that need to be made to an inmemory snapshot and
 apply it via a single update operation. This gives us a significant performance
 boost.
 
-* Can it be made more generic?
-Going forward, we can specify paths and filenames to parse events and load them
-into an inmemory snapshot.
-
-## Snapshots
+### Snapshots
 
 These are inmemory representation of data in sqlite tables. The snapshots allow
-us to correlate data across different types of events.
+us to correlate data across different types of events. We only need to hold snapshots in memory
+until the corresponding metrics are written to the metrics database. After that snapshots can be deleted.
 
-* Why sqlite?
-Sqlite is a very popular database that can be embedded into our process. Java
-libraries for sqlite is also widely used and easy to onboard.
+#### Sqlite
+Sqlite is a very popular database that can be embedded into our process with minimal overhead.
+Our current memory footprint with sqlite and java is around 400mb during heavy workloads, and we
+should be able to reduce this further. We have also utilized JDBC and JOOQ
+which is a java library for programmatically constructing SQL statements to
+interact with sqlite. This helped us move fast and also make our code easy to read.
 
-* write/read performance
 From our tests we were able to do more than 100k writes per second and run
-complex queries in milliseconds.
-
-* Resource utilization?
-The CPU Utilization of sqlite was minimal. The memory utilization of the entire
+complex queries in milliseconds.The CPU Utilization of sqlite was minimal. The memory utilization of the entire
 process after a few days processing metrics was constant around 400mb. This
 needs further investigation on smaller instance types.
 
-* How many snapshots?
-We only need to hold snapshots in memory until the corresponding metrics are
-written to the metrics database. After that snapshots can be deleted.
-
-### Alignment
+#### Alignment
 
 The plugin and the perf analyzer are separate applications and there is no
 explicit co-ordination between them. The plugin emits periodic information like
@@ -114,7 +108,7 @@ No metrics are emitted.
 The latest snapshot is considered. The correct approach is to weight the
 metrics collected in each snapshot by the snapshot window size.
 
-### Correlation
+#### Correlation
 
 We can correlate data from different events emitted by Elasticsearch. A key
 example for resource metrics is we get operating system metrics emitted every
@@ -129,7 +123,7 @@ Filters/aggregations and tables in sql make it easy to work with multiple rows
 of data at the same time declaratively. SQL is also more concise compared to
 for loops and thus easier to read and maintain.
 
-## RequestMetrics
+#### RequestMetrics
 
 * Types of requests
 We currently have different kinds of requests. There are HTTP requests and
@@ -149,7 +143,7 @@ handle cases where events might be missing.
       we assume that the operation has ended if we see a new operation being
       executed on the same thread.
 
-## OS/Node metrics
+#### OS/Node metrics
 OS and node metrics are collected every 5 seconds and updated. Hence, we poll
 for these metrics every 2.5 seconds to make sure we dont miss any updates.
 
@@ -158,7 +152,7 @@ Sometimes because of GC pauses we might have more than one event in the same
 window. In these cases we only consider the latest datapoint and ignore the
 rest.
 
-## MetricsDB
+### MetricsDB
 
 All the data is stored in a metrics database. We create a new database file
 every 5 seconds. This helps us easily truncate old data. Additionally, the
@@ -199,7 +193,7 @@ time by fetching archived database files.
 number of snapshots. Snapshots have additional information like threadID and
 threadName which are not available in the customer facing MetricsDB.
 
-## MetricsEmitter
+### MetricsEmitter
 
 The metrics emitter queries in memory snapshots of data and then bulk loads
 them into metricsDB. This helps us process more than 100k updates per second on
