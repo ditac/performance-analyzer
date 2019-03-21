@@ -10,36 +10,27 @@ writes them to shared memory. These events are then analyzed separately by
 a different process. Having separate processes, gives us more isolation between
 Elasticsearch and the performance analyzer.
 
-* Why separate process?
-* How is synchronization done?
-* What are the cons of a separate process?
-
 # Performance Analyzer Application
 
 The performance analyzer application runs periodically and takes snapshots of
-the data from shared memory.
-
-* How often does it run?
-The application constantly polls a common shared directory for event data
-written by Elasticsearch plugin. The writer deletes old data periodically, but
-some events like OSMetrics are overwritten every 5 seconds. Hence, the reader
-application runs every 2.5 seconds to make sure that no update from the writer
-is missed during normal operation. This avoids explicit synchronization between
+the data from shared memory.The application constantly polls a common shared 
+directory for event data written by Elasticsearch plugin. The writer deletes
+old data periodically, but some events like OSMetrics are overwritten every 5 seconds. 
+Hence, the readerapplication runs every 2.5 seconds to make sure that no update from 
+the writer is missed during normal operation. This avoids explicit synchronization between
 the reader and writer processes.
 
-* Which language pros/cons
 The performance analyzer application is written in Java, and that allows us to
-share code with the writer elasticsearch plugin.
-Java libraries like jdbc and jooq made it very easy to generate sql
-programmatically.
+share code with the writer elasticsearch plugin. Java libraries like jdbc and jooq
+made it very easy to generate sql programmatically.
 The Java process by default takes up a lot of memory. We are running the
 process with some specific options but there is room for further memory
 optimization to enable the process to run on smaller instances.
 
-* Will it scale as we add more processors and events?
 Currently the application can process more up to a 100k events per second
 on a single thread. If necessary, the metrics processing pipeline can be
-modified to parse events concurrently.
+modified to parse events concurrently. This will help support cases where we generate
+more than 100k events per second.
 
 ## Metrics Processor 
 
