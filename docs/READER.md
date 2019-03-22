@@ -87,70 +87,72 @@ complex queries in milliseconds.The CPU Utilization of sqlite was minimal. The m
 process after a few days processing metrics was constant around 400mb. This
 needs further investigation on smaller instance types.
 
-#### Alignment
+#### RequestEvents
 
-The plugin and the perf analyzer are separate applications and there is no
-explicit co-ordination between them. The plugin emits periodic information like
-cpu utilization for a given time period. To handle this scenario snapshots
-expose an alignment function which can return the value across arbitrary time
-windows. It does this by calculating time weighted average for metrics across
-windows.
+The Performance Analyzer plugin currently tracks two different types of events.
+* HTTP requests - These are events emitted when we receive and respond to
+  a customer request.
+* Shard requests - These are internal requests that are generated from a single
+  customer request. For example - a single http search request from the
+customer on an index with multiple shards can result in multiple shardQuery and
+shardFetch events.
 
-* Is there a simpler approach? Why is alignment even necessary?
-The metrics written by the writer are not perfectly aligned. Additionally,
-unpredictable events like garbage collection can add a skew to metric
-publishing.
-
-* What happens when there are missing snapshots?
-No metrics are emitted.
-
-* What happens if there are multiple snapshots in the same window?
-The latest snapshot is considered. The correct approach is to weight the
-metrics collected in each snapshot by the snapshot window size.
-
-#### Correlation
-
-We can correlate data from different events emitted by Elasticsearch. A key
-example for resource metrics is we get operating system metrics emitted every
-5 seconds. This provides us with information such as cpu utilization and disk
-io at a thread level. Additionally, Elasticsearch events like shardbulk and
-shardsearch give us information about the tasks that were being carried out on
-those threads. Using this information we can calculate the resources used at
-a task level.
-
-* How does sql make it easier to read and maintain.
-Filters/aggregations and tables in sql make it easy to work with multiple rows
-of data at the same time declaratively. SQL is also more concise compared to
-for loops and thus easier to read and maintain.
-
-#### RequestMetrics
-
-* Types of requests
-We currently have different kinds of requests. There are HTTP requests and
-shard level requests like shardBulk, shardQuery and shardFetch. We have an http
-event that is emitted when a customer bulk request was received and another
-event emitted when a customer bulk request was completed.
-
-* Missing events
-There are a few design decisions that need to be made around how we plan to
-handle cases where events might be missing.
+In some edge cases, the writer plugin might emit a start event but not an end
+event. For example if Elasticsearch crashes and restarts. In order to handle
+such cases we take the following steps -
     * We ignore end events if start events are not emitted.
     * If we have a start event and a missing end event, we have a concept of
       expiry. Operations that exceed a certain threshold are marked stale and
       ignored.
     * There are certain operations which run from start to finish on a single
       thread. Shard operations are a good example of this. For such operations,
-      we assume that the operation has ended if we see a new operation being
+      we assume that the operation has ended, if we see a new operation being
       executed on the same thread.
 
-#### OS/Node metrics
-OS and node metrics are collected every 5 seconds and updated. Hence, we poll
-for these metrics every 2.5 seconds to make sure we dont miss any updates.
+#### OS/Node samples
+OS and node statistics samples are collected every 5 seconds and updated.
+The reader process, checks shared memory for changes every 2.5 seconds to make
+sure we dont miss any updates.
 
-* Multiple events within the same window
-Sometimes because of GC pauses we might have more than one event in the same
-window. In these cases we only consider the latest datapoint and ignore the
-rest.
+#### Alignment
+
+The plugin and the perf analyzer are separate applications and there is no
+explicit co-ordination between them. The plugin emits periodic information like
+cpu utilization for a given time period. But, the reader on the other hand will
+be exposing metrics for a different period. For example - 
+The plugin emits "CPU_Utilization" metric at 7, 12, 18 and 23. The reader
+snapshots are at 5, 10, 15 and 20.
+
+One approach to solve this problem is for the plugin to emit metrics at a very
+specific time. Given that the plugin is emitting a large number of events and 
+is also subjected to unpredictable events like GC pauses,
+its very likely that there will be a skew in the time at which the plugin
+metrics are emitted. Instead, if we can infer the value of metrics at a given time with
+the time weighted average, we dont need explicit synchronization across the
+reader and writer.
+
+All snapshots expose an alignment function which will return the time weighted
+average for metrics in the requested time range. If there are missing
+snapshots, then the alignment function will return 0.
+
+There is a corner case where we can have multiple samples for the time period
+that need to be algined. In this case, we currently only consider the latest
+sample. As an improvement we can consider the weighted average for all samples.
+
+#### Correlation
+
+We can correlate data between different events to generate fine grained metrics.
+For example lets consider OS statistics, which are emitted by the writer plugin 
+every 5 seconds. This provides us with information such as cpu and disk utilization
+on a per thread basis. Additionally, Elasticsearch events like shardbulk and
+shardsearch give us information about the tasks that were being carried out on
+those threads. By correlating these two,we can calculate the resources used at
+a task level.
+
+On a large Elasticsearch cluster we often see hundreds of thousands of events
+coupled with hundreds of threads.Filters/aggregations in sql make it easy to work with
+such large amounts of data at the same time declaratively. SQL is also more concise compared to
+for loops and thus easier to read and maintain.
 
 ### MetricsDB
 
@@ -164,14 +166,14 @@ To achieve this kind of query, each metric is stored in its own table and the
 final aggregation is done across metrics tables and returned to the client.
 
 * Why this API? What were the other alternatives?
+
 This API gives us the flexibility to query metrics across different dimensions.
 This is not as complex as a full fledged query language like sql, but powerful
-enough for metric aggregations.
-
-The API currently does not support features like metricMath and filtering, but
-these can be supported in the future.
+enough for metric aggregations. The API currently does not support features like
+metricMath and filtering, but these can be supported in the future.
 
 * Why only current snapshot?
+
 We have over 70 metrics with multiple dimensions. We dont want to store all
 these metrics over time to be able to support aggregations. Instead, clients
 who are interested in these metrics can frequently poll for them and
@@ -197,15 +199,17 @@ threadName which are not available in the customer facing MetricsDB.
 
 The metrics emitter queries in memory snapshots of data and then bulk loads
 them into metricsDB. This helps us process more than 100k updates per second on
-a single thread.
+a single thread. A single emitter can emit multiple metrics. We currently have 
+four emitters - request, http, node and master. Every emitter queries an inmemory
+snapshot and then populates the results into the corresponding metricsDB tables.
 
-* How many emitters? Is it one per metric?
- A single emitter can emit multiple metrics. We currently have four emitters -
-request, http, node and master. An emitter queries an inmemory snapshot and
-then populates the result into the corresponding metricsDB tables.
-
-* How quickly can we add new metrics? Do we really have to add a new emitter
-  for every new metric or can it be done through configuration?
 In the future we should be able to add new metrics and dimensions through
 configuration instead of code.
+
+## WebService
+The performance analyzer application exposes a http webservice on port 9600.
+ * API - Request format and response format. Metrics Units
+ * Inter node communication.
+ * Auth
+ * Encryption
 
