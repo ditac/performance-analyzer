@@ -120,7 +120,7 @@ The plugin and the perf analyzer are separate applications and there is no
 explicit co-ordination between them. The plugin emits periodic information like
 cpu utilization for a given time period. But, the reader on the other hand will
 be exposing metrics for a different period. For example - 
-The plugin emits "CPU_Utilization" metric at 7, 12, 18 and 23. The reader
+The plugin emits CPU Utilization metric at 7, 12, 18 and 23. The reader
 snapshots are at 5, 10, 15 and 20.
 
 One approach to solve this problem is for the plugin to emit metrics at a very
@@ -151,49 +151,8 @@ a task level.
 
 On a large Elasticsearch cluster we often see hundreds of thousands of events
 coupled with hundreds of threads.Filters/aggregations in sql make it easy to work with
-such large amounts of data at the same time declaratively. SQL is also more concise compared to
-for loops and thus easier to read and maintain.
-
-### MetricsDB
-
-All the data is stored in a metrics database. We create a new database file
-every 5 seconds. This helps us easily truncate old data. Additionally, the
-client can query for any metrics of their choice and aggregate the metrics
-across supported dimensions.
-metrics=<metrics>&agg=<aggregations>&dim=<dimensions>
-
-To achieve this kind of query, each metric is stored in its own table and the
-final aggregation is done across metrics tables and returned to the client.
-
-* Why this API? What were the other alternatives?
-
-This API gives us the flexibility to query metrics across different dimensions.
-This is not as complex as a full fledged query language like sql, but powerful
-enough for metric aggregations. The API currently does not support features like
-metricMath and filtering, but these can be supported in the future.
-
-* Why only current snapshot?
-
-We have over 70 metrics with multiple dimensions. We dont want to store all
-these metrics over time to be able to support aggregations. Instead, clients
-who are interested in these metrics can frequently poll for them and
-aggregate/store them in a format of their choice. This reduces the amount of
-storage that needs to be available for storing metrics.
-
-* Isnt it too expensive to load again? Why not just query the inmemory
-  snapshots?
-
-1) The metrics aggregation and processing logic is completely separate from the
-format of the inmemory snapshots. We dont expect any major changes to this code
-unless we add new features to the API.
-
-2) MetricsDB files are written to disk and archived for future reference.
-Hence, we can support a playback feature to understand cluster behavior across
-time by fetching archived database files.
-
-3) The number of metric snapshot we have to retain does not have to match the
-number of snapshots. Snapshots have additional information like threadID and
-threadName which are not available in the customer facing MetricsDB.
+such large amounts of data at the same time declaratively. SQL is also more concise,
+compared to iterative for loops and thus easier to read and maintain.
 
 ### MetricsEmitter
 
@@ -206,10 +165,60 @@ snapshot and then populates the results into the corresponding metricsDB tables.
 In the future we should be able to add new metrics and dimensions through
 configuration instead of code.
 
+### MetricsDB
+
+The final metric data is stored in a metrics database. We create a new database file
+every 5 seconds. This helps us easily truncate old data. Additionally, the
+client can query for any metrics of their choice and aggregate the metrics
+across supported dimensions.
+
+To achieve this kind of query, each metric is stored in its own table and the
+final aggregation is done across metrics tables and returned to the client.
+
+The API gives us the flexibility to query metrics across different dimensions.
+It is not as feature rich as a full fledged query language like sql, but powerful
+enough for metric aggregations. The API currently does not support features like
+metricMath and filtering, but support for these can be easily added in the future.
+
+We have over 70 metrics with multiple dimensions. We dont want to store all
+these metrics over time to be able to support aggregations. Instead, clients
+who are interested in these metrics can frequently poll for them and
+aggregate/store them in a format of their choice. This reduces the amount of
+storage that needs to be available for storing metrics.
+
+We chose to create a metricsDB layer instead of directly querying the inmemory
+database for the following reasons - 
+
+* The metrics aggregation and processing logic is completely separate from the
+format of the inmemory snapshots. We dont expect any major changes to this code
+unless we add new features to the API.
+
+* MetricsDB files are written to disk and archived for future reference.
+Hence, we can support a playback feature to understand cluster behavior across
+time by fetching archived database files.
+
+* The number of metric snapshot we have to retain does not have to match the
+number of snapshots. Snapshots have additional information like threadID and
+threadName which are not available in the customer facing MetricsDB.
+
 ## WebService
 The performance analyzer application exposes a http webservice on port 9600.
- * API - Request format and response format. Metrics Units
- * Inter node communication.
- * Auth
- * Encryption
+The webservice layer parses the http request, queries metricsDB and sends the
+json response back to the client. Additionally, if the client requests for
+metrics from all nodes in the cluster the webservice makes requests to all
+nodes in the cluster, concatenates the results and sends it back to the client. 
+
+There are two endpoints supported by the webservice - 
+
+* /metrics - The primary URL for fetching metrics from performance analyzer. It
+  supports three parameters - 
+ - metrics - Array of metric names.
+ - dimensions - Array of dimensions on which to aggregate metrics.
+ - agg - Array of aggregations ( sum, min, max, avg ) to use.
+    
+* /metrics/units - Returns the units associated with every metric supported by
+  Performance Analyzer.
+
+The webservice currently does not support auth/encryption, but can be supported
+easily in the future.
 
