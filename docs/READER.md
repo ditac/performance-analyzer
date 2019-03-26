@@ -13,33 +13,20 @@ Elasticsearch and metrics collection/aggregation.
 # Performance Analyzer Application
 
 The performance analyzer application(reader) runs periodically and takes snapshots of
-the data from shared memory. It scans a shared memory directory every two and a half seconds
-for new event data from the writer. The writer has two different policies for lifecycle management
+the data from shared memory. The writer has two different policies for lifecycle management
 of data in shared memory. 
-* Old events like http requests are deleted after they cross a threshold say around two minutes.
-* Statistics collected from the OS on the other hand are overwritten every 5 seconds.
 
-Hence, the reader samples every 2.5 seconds to make sure that no update from 
+* A new file is created in shared memory for every event. These files are then deleted by the writer once their age
+  crosses a threshold. This strategy is used for http, request and master events.
+* Samples of statistics are written to a single file, which is overwritten every 5 seconds. This strategy is used for
+both operating system statistics(cpu, rss) and node level statistics(circuit breaker).
+
+The reader scans the shared memory directory for updates every 2.5 seconds to make sure that no update from 
 the writer is missed. This scheme avoids explicit synchronization between the reader and writer processes.
 
 The performance analyzer application is written in Java, and this allows us to
 share code with the writer easily. Java libraries like jdbc and jooq made it very easy to
 generate sql programmatically.
-
-### Resource Utilization
-
-One of the cons of using Java was that the JVM with default configuration takes up a lot of memory. 
-The reader holds very few long lived objects in the JVM heap and can run with a very small heap. 
-We currently allocate 64MB of heap by default, but we can go lower on smaller instances. 
-Additionally, we start the JVM with some options that reduce the memory footprint, but there is room for
-further optimizing the memory footprint.
-
-With the default settings the reader can process up to a 100k events per second on a single thread. 
-In our testing this was enough to handle heavy indexing and search traffic on an i3.16xlarge instance type in EC2.
-The single thread also guarantees that we are not stealing more than one core from the OS and Elasticsearch for metric
-processing.
-
-The reader is composed of multiple components and the following sections will cover each of these in more detail.
 
 ## Metrics Processor 
 
@@ -216,6 +203,19 @@ There are two endpoints supported by the webservice -
     
 * /metrics/units - Returns the units associated with every metric supported by
   Performance Analyzer.
+  
+### Resource Utilization
+
+The reader holds very few long lived objects in the JVM heap and can run with a very small heap.
+We currently allocate 64MB of heap by default, but we can go lower on smaller instance types. 
+We change some default JVM parameters like disabling parallel GC to further reduce memory footprint.
+
+With the default settings the reader can process up to a 100k events per second on a single thread. 
+In our testing this was enough to handle heavy indexing and search traffic on an i3.16xlarge instance type in EC2.
+The single thread also guarantees that we are not stealing more than one core from the OS and Elasticsearch for metric
+processing. The memory footprint was consistent around 400m.
+
+The reader is composed of multiple components and the following sections will cover each of these in more detail.
   
 #### Logging
 
