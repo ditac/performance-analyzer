@@ -102,19 +102,19 @@ process after a few days of constant metrics processing was around 400mb.
 
 The Performance Analyzer plugin currently tracks two different types of events.
 
-* HTTP requests - These are events emitted when we receive and respond to
+* HTTP requests - Events emitted when we receive and respond to
   a customer request.
-* Shard requests - These are internal requests that are generated from a single
+* Shard requests - Events emitted when processing internal requests that are generated from a single
   customer request. For example - a single http search request from the
-customer on an index with multiple shards can result in multiple shardQuery and
-shardFetch events.
+  customer on an index with multiple shards can result in multiple shardQuery and
+  shardFetch events.
 
 In some edge cases, the writer plugin might emit a start event but not an end
 event. For example, when Elasticsearch crashes and restarts. In order to handle
-such cases we take the following steps -
-    * We ignore end events if start events are not emitted.
-    * In case of missing end events, we ignore start events older than a threshold(10 mins)
-    * Certain operations like shardBulk run from start to finish on a single thread.
+such cases we take the following steps
+* We ignore end events if start events are not emitted.
+* In case of missing end events, we ignore start events older than a threshold(10 mins)
+* Certain operations like shardBulk run from start to finish on a single thread.
       For such operations, we assume that the operation has ended, if we see a new operation being
       executed on the same thread.
 
