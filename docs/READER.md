@@ -126,9 +126,9 @@ The performance analyzer application exposes a http webservice on port 9600. The
 There are two endpoints supported by the webservice -
 
 * /metrics - The primary URL for fetching metrics from performance analyzer. It supports three parameters
-- metrics - Array of metric names.
-- dimensions - Array of dimensions on which to aggregate metrics.
-- agg - Array of aggregations ( sum, min, max, avg ) to use.
+    * metrics - Array of metric names.
+    * dimensions - Array of dimensions on which to aggregate metrics.
+    * agg - Array of aggregations ( sum, min, max, avg ) to use.
 
 * /metrics/units - Returns the units associated with every metric supported by Performance Analyzer.
 
