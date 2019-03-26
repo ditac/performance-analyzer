@@ -216,3 +216,9 @@ There are two endpoints supported by the webservice -
     
 * /metrics/units - Returns the units associated with every metric supported by
   Performance Analyzer.
+  
+#### Logging
+
+#### Build/Packaging
+
+
