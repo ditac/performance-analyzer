@@ -37,6 +37,7 @@ import com.amazon.opendistro.elasticsearch.performanceanalyzer.config.PluginSett
 import com.amazon.opendistro.elasticsearch.performanceanalyzer.config.TroubleshootingConfig;
 import com.amazon.opendistro.elasticsearch.performanceanalyzer.reader.ReaderMetricsProcessor;
 import com.amazon.opendistro.elasticsearch.performanceanalyzer.rest.QueryMetricsRequestHandler;
+import com.amazon.opendistro.elasticsearch.performanceanalyzer.rca.scheduler.RCAScheduler;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -91,6 +92,9 @@ public class PerformanceAnalyzerApp {
             }
         });
         readerThread.start();
+
+        RCAScheduler scheduler = new RCAScheduler();
+        scheduler.start();
 
         int readerPort = getPortNumber();
         try {
